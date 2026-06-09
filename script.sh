@@ -24,103 +24,6 @@ trh(){ echo -e "${DIM}───────────────────�
 pause(){ echo -ne "${DIM}${TXT_PRESS_ENTER}${NC}"; read -r _; }
 
 PRODUCT="pingbypass"
-find1dotz_api_base="${PINGBYPASS_API_BASE:-https://server-domain.n}"
-find1dotz_api="${find1dotz_api2:-${find1dotz_api_base%/}/api/godmodule/AcT}"
-LveApi="${LveApi:-${find1dotz_api_base%/}/api/godmodule/liveon}"
-kluxtech_home="${Gkluxtech_home:-$HOME/.auto-update-system}"
-find1dotz_file="${Gfind1dotz_file:-${PINGBYPASS_find1dotz_file:-$kluxtech_home/license.bsod}}"
-kluxtechfile="$HOME/.auto-update-system"
-find1dotz="$HOME/.outdated-binarys"
-key2k=""
-NetworkMngr=""
-
-json_escape(){
-  local value="${1:-}"
-  value="${value//\\/\\\\}"
-  value="${value//\"/\\\"}"
-  value="${value//$'\n'/ }"
-  value="${value//$'\r'/ }"
-  printf '%s' "$value"
-}
-
-json_value(){
-  local json="$1" name="$2"
-  printf '%s' "$json" | sed -n "s/.*\"$name\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p" | head -1
-}
-
-json_ok_true(){
-  printf '%s' "$1" | grep -q '"ok"[[:space:]]*:[[:space:]]*true'
-}
-
-ensure_license_home(){
-  if [[ -f "$kluxtech_home" ]]; then
-    local migrated="${kluxtech_home}.legacy-key"
-    mv "$kluxtech_home" "$migrated" 2>/dev/null || die "Could not migrate old license file."
-    kluxtechfile="$migrated"
-  fi
-  mkdir -p "$kluxtech_home" "$(dirname "$find1dotz_file")" 2>/dev/null || true
-}
-
-get_machine_id(){
-  local raw=""
-  raw+="$(cat /etc/machine-id 2>/dev/null || true)"
-  raw+="|$(hostname 2>/dev/null || true)"
-  raw+="|$(uname -m 2>/dev/null || true)"
-  raw+="|$(grep -m1 'model name' /proc/cpuinfo 2>/dev/null | cut -d: -f2- || true)"
-  printf '%s' "$raw" | sha256sum | awk '{print $1}'
-}
-
-load_license_key(){
-  if [[ -f "$find1dotz_file" ]]; then
-    key2k="$(cat "$find1dotz_file" 2>/dev/null || true)"
-  elif [[ -f "$kluxtechfile" ]]; then
-    key2k="$(cat "$kluxtechfile" 2>/dev/null || true)"
-  elif [[ -f "$find1dotz" ]]; then
-    key2k="$(cat "$find1dotz" 2>/dev/null || true)"
-  fi
-
-  if [[ -z "${key2k:-}" ]]; then
-    echo -ne "${BOLD}PingBypass license key${NC}: "
-    read -r key2k
-  fi
-
-  [[ -n "${key2k:-}" ]] || die "License key cannot be empty."
-}
-
-license_check(){
-  command -v curl >/dev/null 2>&1 || die "curl is required for license verification."
-  command -v sha256sum >/dev/null 2>&1 || die "sha256sum is required for machine fingerprinting."
-
-  local response reason hostname payload
-  NetworkMngr="$(get_machine_id)"
-  hostname="$(hostname 2>/dev/null || true)"
-  load_license_key
-
-  payload="{\"key\":\"$(json_escape "$key2k")\",\"machine_id\":\"$NetworkMngr\",\"product\":\"$PRODUCT\",\"script_version\":\"$VERSION\",\"os\":\"linux\",\"hostname\":\"$(json_escape "$hostname")\"}"
-  response="$(curl -fsS --max-time 20 -H "Content-Type: application/json" -d "$payload" "$find1dotz_api" || true)"
-
-  if json_ok_true "$response"; then
-    ensure_license_home
-    printf '%s' "$key2k" > "$find1dotz_file"
-    chmod 600 "$find1dotz_file" 2>/dev/null || true
-    ok "License verified."
-    return 0
-  fi
-
-  reason="$(json_value "$response" reason)"
-  die "License rejected: ${reason:-unknown}"
-}
-
-license_heartbeat(){
-  local event="${1:-start}" response reason payload
-  [[ -n "${key2k:-}" ]] || load_license_key
-  [[ -n "${NetworkMngr:-}" ]] || NetworkMngr="$(get_machine_id)"
-  payload="{\"key\":\"$(json_escape "$key2k")\",\"machine_id\":\"$NetworkMngr\",\"product\":\"$PRODUCT\",\"event\":\"$(json_escape "$event")\"}"
-  response="$(curl -fsS --max-time 15 -H "Content-Type: application/json" -d "$payload" "$LveApi" || true)"
-  if json_ok_true "$response"; then return 0; fi
-  reason="$(json_value "$response" reason)"
-  die "License heartbeat rejected: ${reason:-unknown}"
-}
 
 [[ ${EUID:-$(id -u)} -eq 0 ]] || die "Please run with sudo/root. / Lütfen sudo/root ile çalıştır."
 
@@ -414,13 +317,13 @@ setup_login(){ mkdir -p "$MC_DATA_DIR"; [[ "$MC_ALREADY_AUTHED" == "true" ]] && 
 run_container(){ hr; info "Starting container"; docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true; mkdir -p "$MC_DATA_DIR"; docker run -d --name "$CONTAINER_NAME" --restart unless-stopped -p "${HOST_PORT}:${PB_BIND_PORT}" -e "PB_PASSWORD=${PB_PASSWORD}" -e "PB_BIND_IP=${PB_BIND_IP}" -e "PB_BIND_PORT=${PB_BIND_PORT}" -e "JAVA_MEMORY=${JAVA_MEMORY}" -e "MC_VERSION=${MC_VERSION}" -v "$MC_DATA_DIR:/headlessmc/HeadlessMC" "$IMAGE_NAME" >/dev/null; ok "Container started: $CONTAINER_NAME"; }
 verify_runtime(){ hr; info "$TXT_RUNTIME_CHECK"; sleep 10; if ! docker ps --format '{{.Names}}' | grep -qx "$CONTAINER_NAME"; then err "Container is not running. Recent logs:"; docker logs --tail 120 "$CONTAINER_NAME" 2>&1 || true; return 1; fi; ok "Container is running."; docker exec "$CONTAINER_NAME" test -f /root/.minecraft/mods/astera.jar; docker exec "$CONTAINER_NAME" test -f /root/.minecraft/mods/fabric-api.jar; docker exec "$CONTAINER_NAME" test -f /root/.minecraft/euclient/pingbypass.properties; ok "Mod files and config exist in container."; }
 show_done(){ local ip; ip="$(public_ip)"; hr; echo -e "${GREEN}${BOLD}${TXT_DONE}${NC}"; echo; echo -e "${BOLD}${TXT_CLIENT_INFO}${NC}"; echo "  Host/IP : $ip"; echo "  Port    : $HOST_PORT"; echo "  Pass    : $PB_PASSWORD"; echo; echo "  pb.server=true"; echo "  pb.ip=${PB_BIND_IP}"; echo "  pb.port=${PB_BIND_PORT}"; echo "  pb.password=********"; echo; echo "$TXT_VIEW_LOGS_IF_FAIL"; hr; }
-action_setup(){ license_heartbeat setup; clear || true; check_tools; collect_config || { pause; return; }; find_mod_jar; write_assets; build_image; setup_login; run_container; verify_runtime || { pause; return; }; show_done; pause; }
-action_start(){ license_heartbeat start; local st; st="$(server_status)"; case "$st" in running) warn "$TXT_ALREADY_RUNNING"; pause ;; none) warn "$TXT_NOT_INSTALLED2"; pause ;; stopped) info "$TXT_STARTING"; docker start "$CONTAINER_NAME" >/dev/null; ok "$TXT_RUNNING"; pause ;; esac; }
+action_setup(){ clear || true; check_tools; collect_config || { pause; return; }; find_mod_jar; write_assets; build_image; setup_login; run_container; verify_runtime || { pause; return; }; show_done; pause; }
+action_start(){ local st; st="$(server_status)"; case "$st" in running) warn "$TXT_ALREADY_RUNNING"; pause ;; none) warn "$TXT_NOT_INSTALLED2"; pause ;; stopped) info "$TXT_STARTING"; docker start "$CONTAINER_NAME" >/dev/null; ok "$TXT_RUNNING"; pause ;; esac; }
 action_stop(){ local st; st="$(server_status)"; [[ "$st" == "running" ]] || { warn "$TXT_NOT_RUNNING"; pause; return; }; info "$TXT_STOPPING"; docker stop "$CONTAINER_NAME" >/dev/null; ok "$TXT_STOPPED"; pause; }
-action_restart(){ license_heartbeat restart; local st; st="$(server_status)"; [[ "$st" != "none" ]] || { warn "$TXT_NOT_INSTALLED2"; pause; return; }; info "$TXT_RESTARTING"; docker restart "$CONTAINER_NAME" >/dev/null; ok "$TXT_RUNNING"; pause; }
+action_restart(){ local st; st="$(server_status)"; [[ "$st" != "none" ]] || { warn "$TXT_NOT_INSTALLED2"; pause; return; }; info "$TXT_RESTARTING"; docker restart "$CONTAINER_NAME" >/dev/null; ok "$TXT_RUNNING"; pause; }
 action_logs(){ local st; st="$(server_status)"; [[ "$st" != "none" ]] || { warn "$TXT_NOT_INSTALLED2"; pause; return; }; clear || true; hr; echo -e "${DIM}${TXT_LOG_EXIT}${NC}"; hr; docker logs -f "$CONTAINER_NAME" 2>&1 || true; pause; }
 action_info(){ local st ip masked uptime; st="$(server_status)"; ip="$(public_ip)"; uptime="$(container_uptime)"; load_config; masked="$(printf '*%.0s' $(seq 1 ${#PB_PASSWORD} 2>/dev/null || echo 0))"; clear || true; hr; echo -e "${BOLD}${TXT_CLIENT_INFO}${NC}"; trh; case "$st" in running) echo -e "  ${TXT_STATUS}     : ${GREEN}${TXT_RUNNING}${NC}" ;; stopped) echo -e "  ${TXT_STATUS}     : ${YELLOW}${TXT_STOPPED}${NC}" ;; none) echo -e "  ${TXT_STATUS}     : ${RED}${TXT_NOT_INSTALLED}${NC}" ;; esac; echo "  ${TXT_PUBLIC_IP}  : $ip"; echo "  ${TXT_PUBLIC_PORT}: ${HOST_PORT:-25565}"; echo "  Password   : ${masked:-}"; echo "  ${TXT_BIND}       : ${PB_BIND_IP}:${PB_BIND_PORT}"; echo "  ${TXT_CONTAINER}  : $CONTAINER_NAME"; echo "  ${TXT_IMAGE}      : $IMAGE_NAME"; [[ "$st" == "running" ]] && echo "  ${TXT_UPTIME}     : $uptime"; hr; pause; }
 action_antibot(){ local ip user_guess; ip="$(public_ip)"; user_guess="ubuntu"; clear || true; hr; echo -e "${YELLOW}${BOLD}${TXT_ANTIBOT_TITLE}${NC}"; trh; echo "$TXT_ANTIBOT_NOTE1"; echo "$TXT_ANTIBOT_NOTE2"; echo; echo "VPS IP: $ip"; echo; echo -e "${BOLD}${TXT_WIN_HELP}${NC}"; echo "  ssh -N -D 127.0.0.1:1080 ${user_guess}@${ip}"; echo '  & "C:\Users\YOUR_USER\AppData\Local\imput\Helium\Application\chrome.exe" --user-data-dir="$env:TEMP\notbot-helium-vps-profile" --proxy-server="socks5://127.0.0.1:1080" "https://api.ipify.org" "https://notbot.es"'; echo; echo -e "${BOLD}${TXT_LINUX_HELP}${NC}"; echo "  ssh -N -D 127.0.0.1:1080 ${user_guess}@${ip}"; echo '  chromium --user-data-dir=/tmp/notbot-helium-vps-profile --proxy-server="socks5://127.0.0.1:1080" https://api.ipify.org https://notbot.es'; echo; echo "$TXT_BROWSER_HELP:"; echo '  https://api.ipify.org'; echo '  https://notbot.es'; echo; echo 'Check that api.ipify.org shows the VPS IP. Then complete the verification manually.'; hr; pause; }
 draw_menu(){ local st ip port masked uptime; load_config; st="$(server_status)"; ip="$(public_ip)"; port="${HOST_PORT:-25565}"; uptime="$(container_uptime)"; masked="$(printf '*%.0s' $(seq 1 ${#PB_PASSWORD} 2>/dev/null || echo 0))"; clear || true; hr; echo -e "${BOLD}${MAGENTA}PingBypass${NC}"; echo -e "${BOLD}$TXT_TITLE${NC}"; echo -e "${DIM}$TXT_SUB${NC}"; trh; case "$st" in running) echo -e "  ${TXT_STATUS}: ${GREEN}● ${TXT_RUNNING}${NC}   ${TXT_PUBLIC_IP}: ${CYAN}$ip${NC}   ${TXT_PUBLIC_PORT}: ${CYAN}$port${NC}   ${TXT_UPTIME}: ${DIM}$uptime${NC}" ;; stopped) echo -e "  ${TXT_STATUS}: ${YELLOW}○ ${TXT_STOPPED}${NC}   ${TXT_PUBLIC_IP}: ${CYAN}$ip${NC}   ${TXT_PUBLIC_PORT}: ${CYAN}$port${NC}" ;; none) echo -e "  ${TXT_STATUS}: ${RED}✗ ${TXT_NOT_INSTALLED}${NC}   ${TXT_PUBLIC_IP}: ${CYAN}$ip${NC}" ;; esac; [[ -n "$masked" ]] && echo -e "  Password: ${YELLOW}$masked${NC}   ${TXT_BIND}: ${CYAN}${PB_BIND_IP}:${PB_BIND_PORT}${NC}"; trh; echo "  1) $TXT_MENU_SETUP"; echo "  2) $TXT_MENU_START"; echo "  3) $TXT_MENU_STOP"; echo "  4) $TXT_MENU_RESTART"; echo "  5) $TXT_MENU_LOGS"; echo "  6) $TXT_MENU_INFO"; echo "  7) $TXT_MENU_ANTIBOT"; echo "  8) $TXT_MENU_LANGUAGE"; echo "  9) $TXT_MENU_EXIT"; trh; echo -e "  ${DIM}v${VERSION}  |  ${TXT_CREDIT}${NC}"; hr; echo -ne "  ${BOLD}${TXT_MENU_CHOICE} [1-9]: ${NC}"; }
-main(){ license_check; load_language; while true; do draw_menu; local choice; read -r choice; case "${choice:-}" in 1) action_setup ;; 2) action_start ;; 3) action_stop ;; 4) action_restart ;; 5) action_logs ;; 6) action_info ;; 7) action_antibot ;; 8) choose_language ;; 9) exit 0 ;; *) warn "$TXT_INVALID"; sleep 1 ;; esac; done; }
+main(){ load_language; while true; do draw_menu; local choice; read -r choice; case "${choice:-}" in 1) action_setup ;; 2) action_start ;; 3) action_stop ;; 4) action_restart ;; 5) action_logs ;; 6) action_info ;; 7) action_antibot ;; 8) choose_language ;; 9) exit 0 ;; *) warn "$TXT_INVALID"; sleep 1 ;; esac; done; }
 main "$@"
